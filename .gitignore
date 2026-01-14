@@ -75,3 +75,8 @@ system_prompt.rs.md
 **/repomix-output.*
 **/*.repomix.lock
 .repomix/
+
+
+# Added by cargo
+
+/target

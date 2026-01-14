@@ -1,0 +1,32 @@
+[package]
+name = "mvln"
+version = "0.1.0"
+edition = "2021"
+description = "Move files and create symlinks at original locations"
+license = "MIT"
+repository = "https://github.com/RyderFreeman4Logos/mvln"
+keywords = ["cli", "symlink", "move", "filesystem"]
+categories = ["command-line-utilities", "filesystem"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+glob = "0.3"
+pathdiff = "0.2"
+thiserror = "2"
+fluent = "0.16"
+fluent-langneg = "0.14"
+unic-langid = "0.9"
+sys-locale = "0.3"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
