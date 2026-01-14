@@ -15,6 +15,21 @@ use std::process;
 mod cli;
 use cli::Cli;
 
+/// Shell-escape a string by wrapping it in single quotes and escaping embedded quotes.
+///
+/// This ensures paths with spaces or special characters can be safely copied to a shell.
+fn shell_escape(s: &str) -> String {
+    // If string contains no special chars, return as-is
+    if !s.contains(|c: char| {
+        c.is_whitespace() || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '!' | '*' | '?' | '[')
+    }) {
+        return s.to_string();
+    }
+
+    // Otherwise, wrap in single quotes and escape embedded single quotes
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
 /// Print equivalent shell command for mv operation.
 ///
 /// # Arguments
@@ -22,7 +37,11 @@ use cli::Cli;
 /// * `src_display` - Source path as entered by user (preserved for display)
 /// * `dest_display` - Destination path as entered by user (preserved for display)
 fn print_mv_command(src_display: &str, dest_display: &str) {
-    println!("mv {src_display} {dest_display}");
+    println!(
+        "mv {} {}",
+        shell_escape(src_display),
+        shell_escape(dest_display)
+    );
 }
 
 /// Print equivalent shell command for ln -s operation.
@@ -32,7 +51,11 @@ fn print_mv_command(src_display: &str, dest_display: &str) {
 /// * `target` - The symlink target (relative or absolute based on options)
 /// * `link` - The symlink location
 fn print_ln_command(target: &Path, link: &Path) {
-    println!("ln -s {} {}", target.display(), link.display());
+    println!(
+        "ln -s {} {}",
+        shell_escape(&target.display().to_string()),
+        shell_escape(&link.display().to_string())
+    );
 }
 
 /// Print recovery command when symlink creation fails.
@@ -52,10 +75,12 @@ fn print_recovery_command(
     println!("\n{}", i18n::msg(bundle, "recovery-header", Some(&args)));
     println!("{}", i18n::simple_msg(bundle, "recovery-command"));
 
-    let mut cmd_args = FluentArgs::new();
-    cmd_args.set("dest", dest.display().to_string());
-    cmd_args.set("src", src.display().to_string());
-    println!("  {}", i18n::msg(bundle, "recovery-mv", Some(&cmd_args)));
+    // Use shell-escaped paths for the command
+    println!(
+        "  mv {} {}",
+        shell_escape(&dest.display().to_string()),
+        shell_escape(&src.display().to_string())
+    );
 }
 
 /// Main entry point for mvln CLI.

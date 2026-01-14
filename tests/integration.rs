@@ -267,7 +267,7 @@ fn test_version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("mvls"));
+        .stdout(predicate::str::contains("mvln"));
 }
 
 #[test]
