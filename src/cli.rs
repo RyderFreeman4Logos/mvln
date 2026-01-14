@@ -4,8 +4,8 @@
 //! It handles validation of command-line arguments and converts them into
 //! the internal `MoveOptions` type used by the core logic.
 
-use crate::core::MoveOptions;
 use clap::Parser;
+use mvln::operation::MoveOptions;
 use std::path::PathBuf;
 
 /// Move files with flexible path resolution
@@ -15,6 +15,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "mvln")]
 #[command(author, version, about, long_about = None)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
     /// Source file(s) or directory to move
     ///
@@ -80,7 +81,9 @@ impl Cli {
     /// ```
     pub fn to_move_options(&self) -> MoveOptions {
         MoveOptions {
-            use_relative_paths: !self.absolute, // Default to relative if neither flag set
+            absolute: self.absolute,
+            force: false,   // CLI doesn't have force flag yet (future enhancement)
+            dry_run: false, // Dry-run will be handled in main.rs
         }
     }
 }
@@ -101,7 +104,7 @@ mod tests {
         };
 
         let options = cli.to_move_options();
-        assert!(options.use_relative_paths);
+        assert!(!options.absolute); // Default is relative
     }
 
     #[test]
@@ -116,7 +119,7 @@ mod tests {
         };
 
         let options = cli.to_move_options();
-        assert!(options.use_relative_paths);
+        assert!(!options.absolute); // Explicit relative
     }
 
     #[test]
@@ -131,7 +134,7 @@ mod tests {
         };
 
         let options = cli.to_move_options();
-        assert!(!options.use_relative_paths);
+        assert!(options.absolute); // Explicit absolute
     }
 
     #[test]

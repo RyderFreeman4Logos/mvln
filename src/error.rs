@@ -55,6 +55,22 @@ pub enum MvlnError {
     #[error("failed to create directory {path}: {reason}")]
     CreateDirFailed { path: PathBuf, reason: String },
 
+    /// Invalid destination path.
+    #[error("invalid destination: {reason}")]
+    InvalidDestination { reason: String },
+
+    /// Invalid source path.
+    #[error("invalid path {path}: {reason}")]
+    InvalidPath { path: PathBuf, reason: String },
+
+    /// Glob expansion failed.
+    #[error("glob expansion failed: {reason}")]
+    GlobExpansionFailed { reason: String },
+
+    /// Batch operation failed with multiple errors.
+    #[error("{count} operation(s) failed")]
+    BatchOperationFailed { count: usize },
+
     /// I/O error wrapper.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
