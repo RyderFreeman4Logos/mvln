@@ -2,6 +2,10 @@
 //!
 //! These tests verify the core safety guarantee: FILES ARE NEVER LOST.
 //! They are written first (TDD) to drive the implementation.
+//!
+//! Note: These tests require Unix symlink support.
+
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -500,4 +504,143 @@ fn absolute_mode_works_when_dest_not_exists() {
         via_symlink, "absolute path test",
         "Content should be accessible"
     );
+}
+
+// =============================================================================
+// Self-Move and Subdirectory Detection Tests
+// =============================================================================
+
+#[test]
+fn force_with_source_equals_dest_returns_error() {
+    // GIVEN: A source file exists
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("file.txt");
+
+    create_test_file(&source, "important data");
+
+    // WHEN: mvln with force flag, moving file to itself (via current directory)
+    // This simulates `mvln -f file.txt .` when already in the file's directory
+    let options = MoveOptions {
+        force: true,
+        ..Default::default()
+    };
+
+    // Move to parent directory (which would resolve to same location)
+    let dest = temp.path();
+    let result = move_and_link(&source, dest, &options);
+
+    // THEN: Returns SameSourceAndDest error
+    assert!(result.is_err(), "Should fail when source equals dest");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, MvlnError::SameSourceAndDest { .. }),
+        "Should be SameSourceAndDest error, got: {:?}",
+        err
+    );
+
+    // AND: Source file is preserved (not deleted!)
+    assert!(source.exists(), "Source must still exist");
+    assert!(!source.is_symlink(), "Source must not be a symlink");
+    let content = fs::read_to_string(&source).unwrap();
+    assert_eq!(content, "important data", "Content must be preserved");
+}
+
+#[test]
+fn directory_move_to_subdirectory_returns_error() {
+    // GIVEN: A source directory with subdirectory
+    let temp = TempDir::new().unwrap();
+    let source_dir = temp.path().join("parent");
+    let subdirectory = source_dir.join("child");
+
+    fs::create_dir_all(&subdirectory).expect("Should create directories");
+    create_test_file(&source_dir.join("file.txt"), "test content");
+
+    // WHEN: Attempt to move directory into its own subdirectory
+    // This would cause infinite recursion in cross-device copy
+    let options = MoveOptions::default();
+    let result = move_and_link(&source_dir, &subdirectory, &options);
+
+    // THEN: Returns DestinationInsideSource error
+    assert!(result.is_err(), "Should fail when dest is inside source");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, MvlnError::DestinationInsideSource { .. }),
+        "Should be DestinationInsideSource error, got: {:?}",
+        err
+    );
+
+    // AND: Source directory is preserved
+    assert!(source_dir.exists(), "Source dir must still exist");
+    assert!(source_dir.is_dir(), "Source must still be a directory");
+}
+
+#[test]
+fn directory_move_to_nonexistent_subdirectory_returns_error() {
+    // GIVEN: A source directory exists, but dest is a non-existent path inside it
+    // This tests the codex-review P1 finding: dest.canonicalize() fails when dest
+    // doesn't exist, potentially causing the starts_with check to fail.
+    let temp = TempDir::new().unwrap();
+    let source_dir = temp.path().join("parent");
+
+    fs::create_dir(&source_dir).expect("Should create source directory");
+    create_test_file(&source_dir.join("file.txt"), "test content");
+
+    // Dest is a non-existent path INSIDE source directory
+    let dest = source_dir.join("new_child").join("subdir");
+    assert!(!dest.exists(), "Dest should not exist for this test");
+
+    // WHEN: Attempt to move directory into its own (non-existent) subdirectory
+    let options = MoveOptions::default();
+    let result = move_and_link(&source_dir, &dest, &options);
+
+    // THEN: Returns DestinationInsideSource error
+    assert!(result.is_err(), "Should fail when dest is inside source");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, MvlnError::DestinationInsideSource { .. }),
+        "Should be DestinationInsideSource error, got: {:?}",
+        err
+    );
+
+    // AND: Source directory is preserved
+    assert!(source_dir.exists(), "Source dir must still exist");
+    assert!(source_dir.is_dir(), "Source must still be a directory");
+}
+
+#[test]
+fn symlink_source_self_move_with_force_returns_error() {
+    // GIVEN: A symlink pointing to some target, and we try to move it to itself
+    // This tests the codex-review P1 finding: when source is symlink and dest
+    // resolves to same path, dest.canonicalize() followed the symlink causing
+    // SameSourceAndDest check to miss.
+    let temp = TempDir::new().unwrap();
+    let target_file = temp.path().join("target.txt");
+    let source_link = temp.path().join("link");
+
+    create_test_file(&target_file, "target content");
+    symlink(&target_file, &source_link).expect("Should create symlink");
+
+    // Verify setup
+    assert!(source_link.is_symlink(), "Source should be a symlink");
+
+    // WHEN: Try to move symlink to its parent directory (resolves to same path)
+    let options = MoveOptions {
+        force: true,
+        ..Default::default()
+    };
+    let result = move_and_link(&source_link, temp.path(), &options);
+
+    // THEN: Returns SameSourceAndDest error
+    assert!(result.is_err(), "Should fail when source equals dest");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, MvlnError::SameSourceAndDest { .. }),
+        "Should be SameSourceAndDest error, got: {:?}",
+        err
+    );
+
+    // AND: The symlink is preserved (not deleted!)
+    assert!(source_link.is_symlink(), "Symlink must still exist");
+    // AND: The target file is also preserved
+    assert!(target_file.exists(), "Target file must still exist");
 }

@@ -1,3 +1,11 @@
+//! Integration tests for mvln CLI.
+//!
+//! These tests verify the CLI behavior by running the actual binary.
+//!
+//! Note: These tests require Unix symlink support.
+
+#![cfg(unix)]
+
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::fs;

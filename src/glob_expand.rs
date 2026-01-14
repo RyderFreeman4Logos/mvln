@@ -131,8 +131,10 @@ pub fn expand_globs(patterns: &[String]) -> Result<Vec<PathBuf>, GlobError> {
         }
     }
 
-    // Sort for consistent output
+    // Sort for consistent output and deduplicate
+    // (overlapping globs or duplicate explicit sources would cause issues)
     all_paths.sort();
+    all_paths.dedup();
 
     Ok(all_paths)
 }

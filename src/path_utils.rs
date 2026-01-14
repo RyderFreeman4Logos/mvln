@@ -34,10 +34,19 @@ pub fn compute_symlink_target<P: AsRef<Path>, Q: AsRef<Path>>(
     let target_file = target_file.as_ref();
 
     if absolute {
-        // For absolute mode, canonicalize or return as-is
-        target_file
-            .canonicalize()
-            .unwrap_or_else(|_| target_file.to_path_buf())
+        // For absolute mode, return absolute path WITHOUT resolving symlinks.
+        // IMPORTANT: Do NOT use canonicalize() here because:
+        // 1. If target_file is a symlink, canonicalize resolves it to its target
+        // 2. This causes the new symlink to point to the wrong location
+        // 3. We want the symlink to point to dest itself, not what dest pointed to
+        if target_file.is_absolute() {
+            // Already absolute, use as-is
+            target_file.to_path_buf()
+        } else {
+            // Relative path, convert to absolute based on current directory
+            std::env::current_dir()
+                .map_or_else(|_| target_file.to_path_buf(), |cwd| cwd.join(target_file))
+        }
     } else {
         // Compute relative path from link location to target
         let link_location = link_location.as_ref();
@@ -45,8 +54,25 @@ pub fn compute_symlink_target<P: AsRef<Path>, Q: AsRef<Path>>(
         // Get the parent directory of the link (the symlink lives here)
         let link_dir = link_location.parent().unwrap_or(Path::new("."));
 
-        // Use pathdiff to compute relative path
-        pathdiff::diff_paths(target_file, link_dir).unwrap_or_else(|| target_file.to_path_buf())
+        // Normalize both paths to absolute before computing relative path.
+        // diff_paths returns None when mixing relative/absolute paths.
+        let abs_link_dir = if link_dir.is_absolute() {
+            link_dir.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_or_else(|_| link_dir.to_path_buf(), |cwd| cwd.join(link_dir))
+        };
+
+        let abs_target = if target_file.is_absolute() {
+            target_file.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_or_else(|_| target_file.to_path_buf(), |cwd| cwd.join(target_file))
+        };
+
+        // Use pathdiff to compute relative path (now both are absolute)
+        pathdiff::diff_paths(&abs_target, &abs_link_dir)
+            .unwrap_or_else(|| target_file.to_path_buf())
     }
 }
 
@@ -57,8 +83,9 @@ mod tests {
     #[test]
     fn absolute_path_returns_target_directly() {
         let result = compute_symlink_target("/a/b/link", "/x/y/file", true);
-        // In absolute mode, we try to canonicalize but fall back to original
-        // Since /x/y/file doesn't exist in tests, it returns the path as-is
+        // In absolute mode, we try to canonicalize first.
+        // Since /x/y/file doesn't exist in tests, canonicalize fails
+        // and we return the absolute path as-is.
         assert_eq!(result, PathBuf::from("/x/y/file"));
     }
 
@@ -81,5 +108,24 @@ mod tests {
         // Link at /a/b/c/link pointing to /x/y/file -> ../../../x/y/file
         let result = compute_symlink_target("/a/b/c/link", "/x/y/file", false);
         assert_eq!(result, PathBuf::from("../../../x/y/file"));
+    }
+
+    #[test]
+    fn absolute_mode_with_relative_target() {
+        // When absolute=true and target is relative, convert to absolute
+        let result = compute_symlink_target("/a/b/link", "relative/file.txt", true);
+        // Result should be absolute (joined with current directory)
+        assert!(
+            result.is_absolute(),
+            "Expected absolute path, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn absolute_mode_with_absolute_target() {
+        // When absolute=true and target is already absolute, keep as-is
+        let result = compute_symlink_target("/a/b/link", "/absolute/path/file.txt", true);
+        assert_eq!(result, PathBuf::from("/absolute/path/file.txt"));
     }
 }
