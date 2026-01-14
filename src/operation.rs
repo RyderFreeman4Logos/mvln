@@ -299,6 +299,15 @@ fn copy_and_remove(source: &Path, dest: &Path) -> Result<()> {
             dest: dest.to_path_buf(),
             reason: e.to_string(),
         })?;
+
+        // Attempt to preserve modification time
+        if let Ok(metadata) = source.metadata() {
+            if let Ok(mtime) = metadata.modified() {
+                if let Ok(dest_file) = fs::File::open(dest) {
+                    let _ = dest_file.set_modified(mtime);
+                }
+            }
+        }
     }
 
     // Verify copy succeeded before removing source
@@ -387,9 +396,18 @@ fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
         } else {
             fs::copy(&src_path, &dest_path).map_err(|e| MvlnError::CopyFailed {
                 src: src_path.clone(),
-                dest: dest_path,
+                dest: dest_path.clone(),
                 reason: e.to_string(),
             })?;
+
+            // Attempt to preserve modification time
+            if let Ok(metadata) = src_path.metadata() {
+                if let Ok(mtime) = metadata.modified() {
+                    if let Ok(dest_file) = fs::File::open(&dest_path) {
+                        let _ = dest_file.set_modified(mtime);
+                    }
+                }
+            }
         }
     }
 

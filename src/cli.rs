@@ -13,7 +13,7 @@ use std::path::PathBuf;
 /// mvls supports both relative and absolute path modes when moving files.
 /// By default, it uses relative paths from the destination directory.
 #[derive(Parser, Debug)]
-#[command(name = "mvls")]
+#[command(name = "mvln")]
 #[command(author, version, about, long_about = None)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
