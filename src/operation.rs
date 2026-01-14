@@ -176,6 +176,46 @@ fn is_cross_device_error(e: &std::io::Error) -> bool {
 
 /// Copy source to dest, verify, then remove source.
 fn copy_and_remove(source: &Path, dest: &Path) -> Result<()> {
+    // SAFETY: Check symlink FIRST before checking is_dir().
+    // is_dir() follows symlinks, which could lead to:
+    // 1. Copying target contents instead of the symlink itself
+    // 2. Traversing outside the source tree
+    // 3. remove_dir_all following the symlink and deleting target contents
+    if source.is_symlink() {
+        // Copy the symlink itself, not its target
+        let target = fs::read_link(source).map_err(|e| MvlnError::CopyFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to read symlink: {e}"),
+        })?;
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, dest).map_err(|e| MvlnError::CopyFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to create symlink: {e}"),
+        })?;
+
+        #[cfg(not(unix))]
+        {
+            return Err(MvlnError::CopyFailed {
+                src: source.to_path_buf(),
+                dest: dest.to_path_buf(),
+                reason: "symlinks not supported on this platform".to_string(),
+            });
+        }
+
+        // Remove the original symlink (not its target)
+        fs::remove_file(source).map_err(|e| MvlnError::RemoveFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to remove symlink: {e}"),
+        })?;
+
+        return Ok(());
+    }
+
+    // Not a symlink - proceed with regular file/directory copy
     if source.is_dir() {
         copy_dir_recursive(source, dest)?;
     } else {
@@ -234,6 +274,39 @@ fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
 
+        // SAFETY: Check symlink FIRST before is_dir().
+        // is_dir() follows symlinks, which could cause:
+        // 1. Recursing into directories outside the source tree
+        // 2. Copying target contents instead of the symlink itself
+        if src_path.is_symlink() {
+            // Copy the symlink itself, not its target
+            let target = fs::read_link(&src_path).map_err(|e| MvlnError::CopyFailed {
+                src: src_path.clone(),
+                dest: dest_path.clone(),
+                reason: format!("failed to read symlink: {e}"),
+            })?;
+
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &dest_path).map_err(|e| MvlnError::CopyFailed {
+                src: src_path.clone(),
+                dest: dest_path.clone(),
+                reason: format!("failed to create symlink: {e}"),
+            })?;
+
+            #[cfg(not(unix))]
+            {
+                return Err(MvlnError::CopyFailed {
+                    src: src_path.clone(),
+                    dest: dest_path,
+                    reason: "symlinks not supported on this platform".to_string(),
+                });
+            }
+
+            // Continue to next entry - do NOT recurse into the symlink
+            continue;
+        }
+
+        // Not a symlink - check if directory or regular file
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;
         } else {
