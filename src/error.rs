@@ -18,6 +18,10 @@ pub enum MvlnError {
     #[error("source is a directory: {path}")]
     IsDirectory { path: PathBuf },
 
+    /// Source and destination are the same path.
+    #[error("source and destination are the same: {path}")]
+    SameSourceAndDest { path: PathBuf },
+
     /// Failed to move file.
     #[error("failed to move {src} to {dest}: {reason}")]
     MoveFailed {

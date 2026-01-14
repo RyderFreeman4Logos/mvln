@@ -71,6 +71,19 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     // If dest is a directory, append source filename
     let dest = resolve_destination(source, dest);
 
+    // Step 2.5: Check source != dest (prevent self-move data loss)
+    // Canonicalize paths to detect cases like `mvln file .`
+    // Use unwrap_or to handle cases where paths don't exist yet
+    let source_canonical = source
+        .canonicalize()
+        .unwrap_or_else(|_| source.to_path_buf());
+    let dest_canonical = dest.canonicalize().unwrap_or_else(|_| dest.clone());
+    if source_canonical == dest_canonical {
+        return Err(MvlnError::SameSourceAndDest {
+            path: source.to_path_buf(),
+        });
+    }
+
     // Step 3: Check destination doesn't exist (unless force)
     // Use symlink_metadata to detect dangling symlinks at destination
     let dest_exists = dest.symlink_metadata().is_ok();
