@@ -15,7 +15,7 @@ pathdiff = "0.2"
 thiserror = "2"
 fluent = "0.16"
 fluent-langneg = "0.14"
-unic-langid = "0.9"
+unic-langid = { version = "0.9", features = ["unic-langid-macros"] }
 sys-locale = "0.3"
 libc = "0.2"
 
