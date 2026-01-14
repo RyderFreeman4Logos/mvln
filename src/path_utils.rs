@@ -35,6 +35,12 @@ pub fn compute_symlink_target<P: AsRef<Path>, Q: AsRef<Path>>(
 
     if absolute {
         // For absolute mode, ensure we return an absolute path
+        // Try to canonicalize first (if file exists)
+        if let Ok(canonicalized) = target_file.canonicalize() {
+            return canonicalized;
+        }
+
+        // File doesn't exist, manually construct absolute path
         if target_file.is_absolute() {
             // Already absolute, use as-is
             target_file.to_path_buf()
@@ -62,8 +68,9 @@ mod tests {
     #[test]
     fn absolute_path_returns_target_directly() {
         let result = compute_symlink_target("/a/b/link", "/x/y/file", true);
-        // In absolute mode, we try to canonicalize but fall back to original
-        // Since /x/y/file doesn't exist in tests, it returns the path as-is
+        // In absolute mode, we try to canonicalize first.
+        // Since /x/y/file doesn't exist in tests, canonicalize fails
+        // and we return the absolute path as-is.
         assert_eq!(result, PathBuf::from("/x/y/file"));
     }
 
