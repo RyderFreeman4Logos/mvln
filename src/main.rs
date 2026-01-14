@@ -94,6 +94,34 @@ fn run() -> Result<()> {
 
     // Process each source file
     for source in &source_paths {
+        // Check if source is a directory (don't follow symlinks)
+        let is_dir = source
+            .symlink_metadata()
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
+
+        if is_dir && !cli.whole_dir {
+            // Error: directory requires -w flag
+            let mut args = FluentArgs::new();
+            args.set("path", source.display().to_string());
+            eprintln!("{}", i18n::msg(&bundle, "err-is-directory", Some(&args)));
+
+            // Print hint about using -w or glob
+            if let Some(attr) = bundle
+                .get_message("err-is-directory")
+                .and_then(|m| m.get_attribute("hint"))
+            {
+                let mut errors = vec![];
+                let hint = bundle.format_pattern(attr.value(), Some(&args), &mut errors);
+                eprintln!("  {hint}");
+            }
+
+            errors.push(MvlnError::InvalidPath {
+                path: source.clone(),
+                reason: "is a directory, use -w/--whole-dir flag".to_string(),
+            });
+            continue; // Skip this source
+        }
         // Preserve user input format for display (important for mv command output)
         let src_display = find_original_input(&cli.source, source);
 
