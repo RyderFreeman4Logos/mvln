@@ -10,6 +10,10 @@ pub enum MvlnError {
     #[error("source not found: {path}")]
     SourceNotFound { path: PathBuf },
 
+    /// Cannot access source file or directory (permission denied, etc.).
+    #[error("cannot access source {path}: {reason}")]
+    SourceAccessError { path: PathBuf, reason: String },
+
     /// Destination already exists and force flag not set.
     #[error("destination already exists: {path}")]
     DestinationExists { path: PathBuf },
@@ -21,6 +25,10 @@ pub enum MvlnError {
     /// Source and destination are the same path.
     #[error("source and destination are the same: {path}")]
     SameSourceAndDest { path: PathBuf },
+
+    /// Destination is inside source directory (would cause infinite recursion).
+    #[error("cannot move directory into itself: {src} -> {dest}")]
+    DestinationInsideSource { src: PathBuf, dest: PathBuf },
 
     /// Failed to move file.
     #[error("failed to move {src} to {dest}: {reason}")]

@@ -34,13 +34,11 @@ pub fn compute_symlink_target<P: AsRef<Path>, Q: AsRef<Path>>(
     let target_file = target_file.as_ref();
 
     if absolute {
-        // For absolute mode, ensure we return an absolute path
-        // Try to canonicalize first (if file exists)
-        if let Ok(canonicalized) = target_file.canonicalize() {
-            return canonicalized;
-        }
-
-        // File doesn't exist, manually construct absolute path
+        // For absolute mode, return absolute path WITHOUT resolving symlinks.
+        // IMPORTANT: Do NOT use canonicalize() here because:
+        // 1. If target_file is a symlink, canonicalize resolves it to its target
+        // 2. This causes the new symlink to point to the wrong location
+        // 3. We want the symlink to point to dest itself, not what dest pointed to
         if target_file.is_absolute() {
             // Already absolute, use as-is
             target_file.to_path_buf()
@@ -56,8 +54,25 @@ pub fn compute_symlink_target<P: AsRef<Path>, Q: AsRef<Path>>(
         // Get the parent directory of the link (the symlink lives here)
         let link_dir = link_location.parent().unwrap_or(Path::new("."));
 
-        // Use pathdiff to compute relative path
-        pathdiff::diff_paths(target_file, link_dir).unwrap_or_else(|| target_file.to_path_buf())
+        // Normalize both paths to absolute before computing relative path.
+        // diff_paths returns None when mixing relative/absolute paths.
+        let abs_link_dir = if link_dir.is_absolute() {
+            link_dir.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_or_else(|_| link_dir.to_path_buf(), |cwd| cwd.join(link_dir))
+        };
+
+        let abs_target = if target_file.is_absolute() {
+            target_file.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_or_else(|_| target_file.to_path_buf(), |cwd| cwd.join(target_file))
+        };
+
+        // Use pathdiff to compute relative path (now both are absolute)
+        pathdiff::diff_paths(&abs_target, &abs_link_dir)
+            .unwrap_or_else(|| target_file.to_path_buf())
     }
 }
 

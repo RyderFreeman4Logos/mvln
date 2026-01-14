@@ -61,10 +61,20 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
 
     // Step 1: Verify source exists (including dangling symlinks)
     // Use symlink_metadata instead of exists() to detect dangling symlinks
-    if source.symlink_metadata().is_err() {
-        return Err(MvlnError::SourceNotFound {
-            path: source.to_path_buf(),
-        });
+    // Also distinguish between "not found" and other I/O errors (permission denied, etc.)
+    match source.symlink_metadata() {
+        Ok(_) => {} // Source exists
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            return Err(MvlnError::SourceNotFound {
+                path: source.to_path_buf(),
+            });
+        }
+        Err(e) => {
+            return Err(MvlnError::SourceAccessError {
+                path: source.to_path_buf(),
+                reason: e.to_string(),
+            });
+        }
     }
 
     // Step 2: Resolve destination path
@@ -72,15 +82,29 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     let dest = resolve_destination(source, dest);
 
     // Step 2.5: Check source != dest (prevent self-move data loss)
-    // Canonicalize paths to detect cases like `mvln file .`
-    // Use unwrap_or to handle cases where paths don't exist yet
-    let source_canonical = source
-        .canonicalize()
-        .unwrap_or_else(|_| source.to_path_buf());
-    let dest_canonical = dest.canonicalize().unwrap_or_else(|_| dest.clone());
+    // Use absolute_path_no_follow to handle symlinks correctly - don't follow them.
+    let source_canonical = absolute_path_no_follow(source);
+    let dest_canonical = absolute_path_no_follow(&dest);
+
     if source_canonical == dest_canonical {
         return Err(MvlnError::SameSourceAndDest {
             path: source.to_path_buf(),
+        });
+    }
+
+    // Step 2.6: Check dest is not inside source (prevent infinite recursion)
+    // This can happen when moving a directory to its own subdirectory,
+    // e.g., `mvln dir dir/subdir` would cause copy_dir_recursive to loop forever.
+    // Only check for actual directories (not symlinks to directories).
+    let source_is_symlink = source
+        .symlink_metadata()
+        .map(|m| m.is_symlink())
+        .unwrap_or(false);
+    let source_is_real_dir = !source_is_symlink && source.is_dir();
+    if source_is_real_dir && dest_canonical.starts_with(&source_canonical) {
+        return Err(MvlnError::DestinationInsideSource {
+            src: source.to_path_buf(),
+            dest: dest.clone(),
         });
     }
 
@@ -163,6 +187,41 @@ fn resolve_destination(source: &Path, dest: &Path) -> PathBuf {
         }
     }
     dest.to_path_buf()
+}
+
+/// Compute absolute path for a path without following symlinks.
+/// If the path is a symlink, canonicalize the parent and join with filename.
+/// If the path doesn't exist, build absolute path from parent.
+fn absolute_path_no_follow(path: &Path) -> PathBuf {
+    let is_symlink = path
+        .symlink_metadata()
+        .map(|m| m.is_symlink())
+        .unwrap_or(false);
+
+    if is_symlink {
+        // For symlinks, canonicalize parent and join with filename
+        std::fs::canonicalize(path.parent().unwrap_or(Path::new("."))).map_or_else(
+            |_| path.to_path_buf(),
+            |p| p.join(path.file_name().unwrap_or_default()),
+        )
+    } else if let Ok(canonical) = path.canonicalize() {
+        canonical
+    } else {
+        // Path doesn't exist - build absolute path from parent
+        path.parent()
+            .map(|p| {
+                if p.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    p
+                }
+            })
+            .and_then(|p| p.canonicalize().ok())
+            .map_or_else(
+                || path.to_path_buf(),
+                |p| p.join(path.file_name().unwrap_or_default()),
+            )
+    }
 }
 
 /// Move file or directory from source to dest.

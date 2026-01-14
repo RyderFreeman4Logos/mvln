@@ -216,6 +216,14 @@ fn find_original_input(original_args: &[PathBuf], expanded_path: &Path) -> Strin
             return arg_str;
         }
 
+        // Normalized match: handle ./file vs file, trailing slashes, etc.
+        // Compare by converting both to canonical form for comparison.
+        let arg_normalized = arg.components().collect::<std::path::PathBuf>();
+        let expanded_normalized = expanded_path.components().collect::<std::path::PathBuf>();
+        if arg_normalized == expanded_normalized {
+            return arg_str;
+        }
+
         // If arg is a glob pattern that could have expanded to this path
         if mvln::glob_expand::is_glob_pattern(&arg_str) {
             // Return the expanded path display
