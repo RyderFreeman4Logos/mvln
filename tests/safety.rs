@@ -270,6 +270,73 @@ fn destination_exists_with_force_overwrites() {
     assert!(source.is_symlink(), "Source should be symlink");
 }
 
+#[test]
+fn force_on_symlink_to_dir_does_not_delete_target_contents() {
+    // GIVEN: The RESOLVED destination path is a symlink to a directory.
+    // This tests the P0 bug where is_dir() follows symlinks, causing
+    // remove_dir_all to delete the target directory contents.
+    //
+    // Scenario: dest_dir/source.txt already exists as symlink -> target_dir
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.txt");
+    let dest_dir = temp.path().join("dest_dir");
+    let target_dir = temp.path().join("target_dir");
+
+    create_test_file(&source, "new content");
+
+    // Create a real directory with important content
+    fs::create_dir(&target_dir).expect("Should create target dir");
+    let important_file = target_dir.join("important.txt");
+    fs::write(&important_file, "DO NOT DELETE").expect("Should write important file");
+
+    // Create dest_dir with an existing symlink at source.txt -> target_dir
+    fs::create_dir(&dest_dir).expect("Should create dest dir");
+    let existing_symlink = dest_dir.join("source.txt");
+    symlink(&target_dir, &existing_symlink).expect("Should create symlink");
+
+    // Verify setup: existing_symlink is a symlink that resolves to a directory
+    assert!(existing_symlink.is_symlink(), "should be symlink");
+    assert!(existing_symlink.is_dir(), "symlink resolves to dir");
+
+    // WHEN: mvln source.txt to dest_dir/ with force
+    // resolve_destination will turn dest_dir/ into dest_dir/source.txt
+    // which is the existing symlink pointing to target_dir
+    let options = MoveOptions {
+        force: true,
+        ..Default::default()
+    };
+    let result = move_and_link(&source, &dest_dir, &options);
+
+    // THEN: Operation succeeds
+    assert!(
+        result.is_ok(),
+        "Should succeed with force flag: {:?}",
+        result
+    );
+
+    // AND: The target directory and its contents are PRESERVED (critical!)
+    assert!(target_dir.exists(), "Target directory must still exist");
+    assert!(
+        important_file.exists(),
+        "Important file must NOT be deleted"
+    );
+    let preserved = fs::read_to_string(&important_file).expect("Should read important file");
+    assert_eq!(preserved, "DO NOT DELETE", "File content must be preserved");
+
+    // AND: The destination now has the new file content (symlink was replaced)
+    let final_dest = dest_dir.join("source.txt");
+    assert!(final_dest.exists(), "Dest should exist");
+    assert!(
+        !final_dest.is_symlink(),
+        "Dest should no longer be a symlink to dir"
+    );
+    let new_content = fs::read_to_string(&final_dest).expect("Should read dest");
+    assert_eq!(new_content, "new content", "Dest should have new content");
+
+    // AND: Source is now a symlink pointing to dest
+    assert!(source.is_symlink(), "Source should be symlink");
+}
+
 // =============================================================================
 // Dry-Run Tests
 // =============================================================================

@@ -98,14 +98,26 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     }
 
     // Step 7: Remove destination if force and exists
+    // SAFETY: Check symlink FIRST to avoid following symlinks to directories.
+    // is_dir() follows symlinks, so a symlink->dir would cause remove_dir_all
+    // to delete the target directory contents instead of just the symlink.
     if dest.exists() && options.force {
-        if dest.is_dir() {
+        if dest.is_symlink() {
+            // Remove symlink itself, not the target
+            fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {
+                src: source.to_path_buf(),
+                dest: dest.clone(),
+                reason: format!("failed to remove existing symlink: {e}"),
+            })?;
+        } else if dest.is_dir() {
+            // Actual directory (not symlink), safe to remove recursively
             fs::remove_dir_all(&dest).map_err(|e| MvlnError::MoveFailed {
                 src: source.to_path_buf(),
                 dest: dest.clone(),
                 reason: format!("failed to remove existing directory: {e}"),
             })?;
         } else {
+            // Regular file
             fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {
                 src: source.to_path_buf(),
                 dest: dest.clone(),
