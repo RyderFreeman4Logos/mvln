@@ -64,6 +64,63 @@ fn test_glob_pattern_multiple_files() {
 }
 
 #[test]
+fn test_directory_rejected_without_whole_dir_flag() {
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src_dir");
+    let dest_dir = tmp.path().join("dest");
+    let src_file = src_dir.join("file.txt");
+
+    fs::create_dir(&src_dir).unwrap();
+    fs::write(&src_file, "content").unwrap();
+    fs::create_dir(&dest_dir).unwrap();
+
+    // WHEN: mvln without -w flag on a directory
+    mvln_cmd()
+        .arg(&src_dir)
+        .arg(&dest_dir)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("directory"));
+
+    // THEN: Source directory remains unchanged
+    assert!(src_dir.exists(), "Source dir should still exist");
+    assert!(src_dir.is_dir(), "Source should still be a directory");
+    assert!(!src_dir.is_symlink(), "Source should NOT be a symlink");
+}
+
+#[test]
+fn test_directory_accepted_with_whole_dir_flag() {
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src_dir");
+    let dest_dir = tmp.path().join("dest");
+    let src_file = src_dir.join("file.txt");
+
+    fs::create_dir(&src_dir).unwrap();
+    fs::write(&src_file, "content").unwrap();
+    fs::create_dir(&dest_dir).unwrap();
+
+    // WHEN: mvln WITH -w flag on a directory
+    mvln_cmd()
+        .arg("-w")
+        .arg(&src_dir)
+        .arg(&dest_dir)
+        .assert()
+        .success();
+
+    // THEN: Source dir is now a symlink
+    assert!(src_dir.is_symlink(), "Source dir should be a symlink");
+
+    // Destination should contain the moved directory
+    let moved_dir = dest_dir.join("src_dir");
+    assert!(moved_dir.exists(), "Moved dir should exist");
+    assert!(moved_dir.is_dir(), "Moved dir should be a directory");
+    assert!(
+        moved_dir.join("file.txt").exists(),
+        "File inside moved dir should exist"
+    );
+}
+
+#[test]
 fn test_directory_move_with_whole_dir() {
     let tmp = TempDir::new().unwrap();
     let src_dir = tmp.path().join("src_dir");
