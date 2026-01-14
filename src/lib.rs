@@ -4,6 +4,7 @@
 //! while preserving access through symlinks.
 
 pub mod error;
+pub mod i18n;
 pub mod operation;
 pub mod path_utils;
 
