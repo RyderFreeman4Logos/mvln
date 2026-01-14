@@ -411,6 +411,23 @@ fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
         }
     }
 
+    // Attempt to preserve directory permissions and modification time
+    #[cfg(unix)]
+    {
+        if let Ok(metadata) = source.metadata() {
+            // Preserve permissions
+            let perms = metadata.permissions();
+            let _ = fs::set_permissions(dest, perms);
+
+            // Preserve modification time
+            if let Ok(mtime) = metadata.modified() {
+                if let Ok(dest_file) = fs::File::open(dest) {
+                    let _ = dest_file.set_modified(mtime);
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
