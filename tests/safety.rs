@@ -372,3 +372,132 @@ fn dry_run_does_not_modify_filesystem() {
     let actual_content = fs::read_to_string(&source).unwrap();
     assert_eq!(actual_content, content, "Source content unchanged");
 }
+
+// =============================================================================
+// Dangling Symlink Tests
+// =============================================================================
+
+#[test]
+fn dangling_symlink_source_can_be_moved() {
+    // GIVEN: A dangling symlink as source (points to non-existent target)
+    let temp = TempDir::new().unwrap();
+    let nonexistent_target = temp.path().join("nonexistent_target.txt");
+    let source = temp.path().join("dangling_link");
+    let dest = temp.path().join("dest_link");
+
+    // Create a dangling symlink
+    symlink(&nonexistent_target, &source).expect("Should create dangling symlink");
+
+    // Verify it's a dangling symlink (is_symlink but doesn't exist when followed)
+    assert!(source.is_symlink(), "Source should be a symlink");
+    assert!(!source.exists(), "Dangling symlink should not resolve");
+
+    // WHEN: mvln is called on the dangling symlink
+    let options = MoveOptions::default();
+    let result = move_and_link(&source, &dest, &options);
+
+    // THEN: Operation succeeds
+    assert!(
+        result.is_ok(),
+        "Should succeed moving dangling symlink: {:?}",
+        result
+    );
+
+    // Source is now a symlink pointing to dest
+    assert!(source.is_symlink(), "Source should be a symlink");
+
+    // Dest is the dangling symlink (still points to nonexistent target)
+    assert!(dest.is_symlink(), "Dest should be a symlink");
+    let dest_target = fs::read_link(&dest).expect("Should read dest symlink");
+    assert_eq!(
+        dest_target, nonexistent_target,
+        "Dest symlink should point to original target"
+    );
+}
+
+#[test]
+fn dangling_symlink_dest_detected_with_force() {
+    // GIVEN: Source file exists, destination is a dangling symlink
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.txt");
+    let nonexistent_target = temp.path().join("nonexistent.txt");
+    let dest = temp.path().join("dest.txt");
+
+    create_test_file(&source, "new content");
+
+    // Create a dangling symlink at destination
+    symlink(&nonexistent_target, &dest).expect("Should create dangling symlink at dest");
+
+    // Verify dest is a dangling symlink
+    assert!(dest.is_symlink(), "Dest should be a symlink");
+    assert!(!dest.exists(), "Dest should be dangling");
+
+    // WHEN: mvln with force flag
+    let options = MoveOptions {
+        force: true,
+        ..Default::default()
+    };
+    let result = move_and_link(&source, &dest, &options);
+
+    // THEN: Operation succeeds, dangling symlink is replaced
+    assert!(
+        result.is_ok(),
+        "Should succeed with force flag: {:?}",
+        result
+    );
+
+    // Dest is now a regular file with new content (dangling symlink replaced)
+    assert!(dest.exists(), "Dest should exist");
+    assert!(!dest.is_symlink(), "Dest should no longer be a symlink");
+    let dest_content = fs::read_to_string(&dest).expect("Should read dest");
+    assert_eq!(dest_content, "new content", "Dest should have new content");
+
+    // Source is now a symlink pointing to dest
+    assert!(source.is_symlink(), "Source should be a symlink");
+}
+
+// =============================================================================
+// Absolute Path Edge Cases
+// =============================================================================
+
+#[test]
+fn absolute_mode_works_when_dest_not_exists() {
+    // GIVEN: Source file exists, destination does not exist (new file)
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.txt");
+    let dest = temp.path().join("archive").join("new_file.txt");
+
+    create_test_file(&source, "absolute path test");
+
+    // WHEN: mvln with absolute mode
+    let options = MoveOptions {
+        absolute: true,
+        ..Default::default()
+    };
+    let result = move_and_link(&source, &dest, &options);
+
+    // THEN: Operation succeeds
+    assert!(result.is_ok(), "Operation should succeed: {:?}", result);
+
+    // Source is a symlink with absolute target
+    assert!(source.is_symlink(), "Source should be a symlink");
+
+    let raw_target = fs::read_link(&source).expect("Should read symlink");
+    assert!(
+        raw_target.is_absolute(),
+        "Symlink should use absolute path, got: {:?}",
+        raw_target
+    );
+
+    // Symlink resolves correctly to destination
+    let resolved = fs::canonicalize(&source).expect("Should resolve symlink");
+    let expected = fs::canonicalize(&dest).expect("Should canonicalize dest");
+    assert_eq!(resolved, expected, "Symlink should resolve to destination");
+
+    // Content is accessible through symlink
+    let via_symlink = fs::read_to_string(&source).expect("Should read via symlink");
+    assert_eq!(
+        via_symlink, "absolute path test",
+        "Content should be accessible"
+    );
+}
