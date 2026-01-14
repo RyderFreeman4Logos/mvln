@@ -59,8 +59,9 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     let source = source.as_ref();
     let dest = dest.as_ref();
 
-    // Step 1: Verify source exists
-    if !source.exists() {
+    // Step 1: Verify source exists (including dangling symlinks)
+    // Use symlink_metadata instead of exists() to detect dangling symlinks
+    if source.symlink_metadata().is_err() {
         return Err(MvlnError::SourceNotFound {
             path: source.to_path_buf(),
         });
@@ -71,7 +72,9 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     let dest = resolve_destination(source, dest);
 
     // Step 3: Check destination doesn't exist (unless force)
-    if dest.exists() && !options.force {
+    // Use symlink_metadata to detect dangling symlinks at destination
+    let dest_exists = dest.symlink_metadata().is_ok();
+    if dest_exists && !options.force {
         return Err(MvlnError::DestinationExists { path: dest.clone() });
     }
 
@@ -101,7 +104,7 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     // SAFETY: Check symlink FIRST to avoid following symlinks to directories.
     // is_dir() follows symlinks, so a symlink->dir would cause remove_dir_all
     // to delete the target directory contents instead of just the symlink.
-    if dest.exists() && options.force {
+    if dest_exists && options.force {
         if dest.is_symlink() {
             // Remove symlink itself, not the target
             fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {
