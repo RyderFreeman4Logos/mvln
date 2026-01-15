@@ -64,6 +64,10 @@ pub struct Cli {
     /// files with files and directories with directories (not cross-type).
     #[arg(short = 'f', long)]
     pub force: bool,
+
+    /// Print commands without executing
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 impl Cli {
@@ -90,7 +94,7 @@ impl Cli {
         MoveOptions {
             absolute: self.absolute,
             force: self.force,
-            dry_run: false, // Dry-run will be handled in main.rs
+            dry_run: self.dry_run,
         }
     }
 }
@@ -109,6 +113,7 @@ mod tests {
             whole_dir: false,
             verbose: false,
             force: false,
+            dry_run: false,
         };
 
         let options = cli.to_move_options();
@@ -125,6 +130,7 @@ mod tests {
             whole_dir: false,
             verbose: false,
             force: false,
+            dry_run: false,
         };
 
         let options = cli.to_move_options();
@@ -141,6 +147,7 @@ mod tests {
             whole_dir: false,
             verbose: false,
             force: false,
+            dry_run: false,
         };
 
         let options = cli.to_move_options();
@@ -161,6 +168,7 @@ mod tests {
             whole_dir: false,
             verbose: false,
             force: false,
+            dry_run: false,
         };
 
         assert_eq!(cli.source.len(), 3);

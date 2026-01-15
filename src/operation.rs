@@ -263,9 +263,21 @@ fn move_file(source: &Path, dest: &Path) -> Result<()> {
 
 /// Check if error is cross-device link error (EXDEV).
 fn is_cross_device_error(e: &std::io::Error) -> bool {
-    // On Unix, cross-device move returns EXDEV (errno 18)
-    // std::io::Error doesn't have a specific variant, so we check raw_os_error
-    e.raw_os_error() == Some(libc::EXDEV)
+    #[cfg(unix)]
+    {
+        e.raw_os_error() == Some(libc::EXDEV)
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_NOT_SAME_DEVICE (0x11 = 17)
+        const ERROR_NOT_SAME_DEVICE: i32 = 17;
+        e.raw_os_error() == Some(ERROR_NOT_SAME_DEVICE)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = e; // suppress unused warning
+        false
+    }
 }
 
 /// Copy source to dest, verify, then remove source.
@@ -431,18 +443,15 @@ fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
     }
 
     // Attempt to preserve directory permissions and modification time
-    #[cfg(unix)]
-    {
-        if let Ok(metadata) = source.metadata() {
-            // Preserve permissions
-            let perms = metadata.permissions();
-            let _ = fs::set_permissions(dest, perms);
+    if let Ok(metadata) = source.metadata() {
+        // Preserve permissions
+        let perms = metadata.permissions();
+        let _ = fs::set_permissions(dest, perms);
 
-            // Preserve modification time
-            if let Ok(mtime) = metadata.modified() {
-                if let Ok(dest_file) = fs::File::open(dest) {
-                    let _ = dest_file.set_modified(mtime);
-                }
+        // Preserve modification time
+        if let Ok(mtime) = metadata.modified() {
+            if let Ok(dest_file) = fs::File::open(dest) {
+                let _ = dest_file.set_modified(mtime);
             }
         }
     }
@@ -480,7 +489,21 @@ fn create_symlink(source: &Path, dest: &Path, symlink_target: &Path) -> Result<(
         })?;
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        if dest.is_dir() {
+            std::os::windows::fs::symlink_dir(symlink_target, source)
+        } else {
+            std::os::windows::fs::symlink_file(symlink_target, source)
+        }
+        .map_err(|e| MvlnError::SymlinkFailed {
+            link: source.to_path_buf(),
+            target: dest.to_path_buf(),
+            reason: e.to_string(),
+        })?;
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         return Err(MvlnError::SymlinkFailed {
             link: source.to_path_buf(),
