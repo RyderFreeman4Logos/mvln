@@ -57,6 +57,13 @@ pub struct Cli {
     /// Print detailed information about operations being performed.
     #[arg(short = 'v', long)]
     pub verbose: bool,
+
+    /// Force overwrite of existing destination
+    ///
+    /// Overwrite the destination if it already exists. Only allows replacing
+    /// files with files and directories with directories (not cross-type).
+    #[arg(short = 'f', long)]
+    pub force: bool,
 }
 
 impl Cli {
@@ -82,7 +89,7 @@ impl Cli {
     pub fn to_move_options(&self) -> MoveOptions {
         MoveOptions {
             absolute: self.absolute,
-            force: false,   // CLI doesn't have force flag yet (future enhancement)
+            force: self.force,
             dry_run: false, // Dry-run will be handled in main.rs
         }
     }
@@ -101,6 +108,7 @@ mod tests {
             absolute: false,
             whole_dir: false,
             verbose: false,
+            force: false,
         };
 
         let options = cli.to_move_options();
@@ -116,6 +124,7 @@ mod tests {
             absolute: false,
             whole_dir: false,
             verbose: false,
+            force: false,
         };
 
         let options = cli.to_move_options();
@@ -131,6 +140,7 @@ mod tests {
             absolute: true,
             whole_dir: false,
             verbose: false,
+            force: false,
         };
 
         let options = cli.to_move_options();
@@ -150,6 +160,7 @@ mod tests {
             absolute: false,
             whole_dir: false,
             verbose: false,
+            force: false,
         };
 
         assert_eq!(cli.source.len(), 3);

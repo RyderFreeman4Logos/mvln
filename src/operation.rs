@@ -142,6 +142,25 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     // is_dir() follows symlinks, so a symlink->dir would cause remove_dir_all
     // to delete the target directory contents instead of just the symlink.
     if dest_exists && options.force {
+        // Type mismatch check: prevent replacing directory with file or vice versa.
+        // This protects against accidental deletion of entire directory trees.
+        // Symlinks at destination are always replaceable (they're just pointers).
+        if !dest.is_symlink() {
+            let dest_is_dir = dest.is_dir();
+            if source_is_real_dir != dest_is_dir {
+                return Err(MvlnError::TypeMismatch {
+                    src: source.to_path_buf(),
+                    dest: dest.clone(),
+                    src_type: if source_is_real_dir {
+                        "directory"
+                    } else {
+                        "file"
+                    },
+                    dest_type: if dest_is_dir { "directory" } else { "file" },
+                });
+            }
+        }
+
         if dest.is_symlink() {
             // Remove symlink itself, not the target
             fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {

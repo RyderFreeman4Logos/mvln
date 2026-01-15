@@ -150,22 +150,12 @@ fn run() -> Result<()> {
         // Preserve user input format for display (important for mv command output)
         let src_display = find_original_input(&cli.source, source);
 
-        // Determine actual destination (append filename if dest is directory)
-        let dest = if cli.dest.is_dir() {
-            cli.dest
-                .join(source.file_name().ok_or_else(|| MvlnError::InvalidPath {
-                    path: source.clone(),
-                    reason: "source has no filename".to_string(),
-                })?)
-        } else {
-            cli.dest.clone()
-        };
-
-        // Print equivalent mv command
-        print_mv_command(&src_display, &dest.display().to_string());
+        // Print equivalent mv command (using user's original dest for display)
+        print_mv_command(&src_display, &cli.dest.display().to_string());
 
         // Execute move-and-link operation
-        match move_and_link(source, &dest, &options) {
+        // Note: move_and_link handles destination resolution (appending filename if dest is dir)
+        match move_and_link(source, &cli.dest, &options) {
             Ok(result) => {
                 // Print equivalent ln -s command
                 print_ln_command(&result.symlink_target, &result.source);
@@ -187,9 +177,9 @@ fn run() -> Result<()> {
             }
             Err(e) => {
                 // Handle symlink failure specially (file is preserved)
-                if matches!(e, MvlnError::SymlinkFailed { .. }) {
+                if let MvlnError::SymlinkFailed { target, .. } = &e {
                     eprintln!("\n{e}");
-                    print_recovery_command(&bundle, &dest, source);
+                    print_recovery_command(&bundle, target, source);
                     files_moved += 1; // File was moved successfully
                 } else {
                     eprintln!("\n{e}");

@@ -321,3 +321,185 @@ fn test_symlink_resolution() {
 
     assert!(resolved.exists());
 }
+
+#[test]
+fn test_force_file_to_directory_moves_into() {
+    let tmp = TempDir::new().unwrap();
+    let src_file = tmp.path().join("file.txt");
+    let dest_dir = tmp.path().join("target");
+
+    // Create source file
+    fs::write(&src_file, "content").unwrap();
+    // Create destination as a directory
+    fs::create_dir(&dest_dir).unwrap();
+    fs::write(dest_dir.join("inner.txt"), "inner").unwrap();
+
+    // WHEN: Move file to a directory with -f
+    // This moves the file INTO the directory (standard behavior)
+    mvln_cmd()
+        .arg("-f")
+        .arg(&src_file)
+        .arg(&dest_dir)
+        .assert()
+        .success();
+
+    // THEN: File should be inside the directory
+    assert!(dest_dir.join("file.txt").exists());
+    assert!(src_file.is_symlink());
+}
+
+#[test]
+fn test_force_directory_to_file_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src_dir");
+    let dest_file = tmp.path().join("existing_file.txt");
+
+    // Create source directory and destination file
+    fs::create_dir(&src_dir).unwrap();
+    fs::write(src_dir.join("inner.txt"), "inner").unwrap();
+    fs::write(&dest_file, "existing content").unwrap();
+
+    // WHEN: Try to force-replace file with directory
+    mvln_cmd()
+        .arg("-f")
+        .arg("-w") // Need -w flag for directory source
+        .arg(&src_dir)
+        .arg(&dest_file)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("type mismatch"));
+
+    // THEN: Both source and destination should be unchanged
+    assert!(src_dir.is_dir(), "Source directory should still exist");
+    assert!(dest_file.is_file(), "Destination file should still exist");
+    assert_eq!(
+        fs::read_to_string(&dest_file).unwrap(),
+        "existing content",
+        "File content should be preserved"
+    );
+}
+
+#[test]
+fn test_force_file_to_file_allowed() {
+    let tmp = TempDir::new().unwrap();
+    let src_file = tmp.path().join("src.txt");
+    let dest_file = tmp.path().join("dest.txt");
+
+    fs::write(&src_file, "new content").unwrap();
+    fs::write(&dest_file, "old content").unwrap();
+
+    // WHEN: Force-replace file with file (same type)
+    mvln_cmd()
+        .arg("-f")
+        .arg(&src_file)
+        .arg(&dest_file)
+        .assert()
+        .success();
+
+    // THEN: Source should be symlink, dest should have new content
+    assert!(src_file.is_symlink(), "Source should be a symlink");
+    assert_eq!(
+        fs::read_to_string(&dest_file).unwrap(),
+        "new content",
+        "Destination should have new content"
+    );
+}
+
+#[test]
+fn test_force_directory_into_directory() {
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src_dir");
+    let dest_dir = tmp.path().join("dest_dir");
+
+    fs::create_dir(&src_dir).unwrap();
+    fs::write(src_dir.join("new.txt"), "new").unwrap();
+    fs::create_dir(&dest_dir).unwrap();
+    fs::write(dest_dir.join("old.txt"), "old").unwrap();
+
+    // WHEN: Move directory to existing directory with -f -w
+    // Standard behavior: src_dir is moved INTO dest_dir as dest_dir/src_dir
+    mvln_cmd()
+        .arg("-f")
+        .arg("-w")
+        .arg(&src_dir)
+        .arg(&dest_dir)
+        .assert()
+        .success();
+
+    // THEN: Source should be symlink, directory should be inside dest
+    assert!(src_dir.is_symlink(), "Source should be a symlink");
+    // src_dir was moved INTO dest_dir, so dest_dir/src_dir should exist
+    assert!(
+        dest_dir.join("src_dir").is_dir(),
+        "src_dir should be inside dest_dir"
+    );
+    assert!(
+        dest_dir.join("src_dir").join("new.txt").exists(),
+        "new.txt should be inside dest_dir/src_dir"
+    );
+    // Old content of dest_dir should still be there
+    assert!(
+        dest_dir.join("old.txt").exists(),
+        "old.txt should still exist in dest_dir"
+    );
+}
+
+#[test]
+fn test_force_directory_replaces_directory() {
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("item");
+    let dest_path = tmp.path().join("target");
+
+    fs::create_dir(&src_dir).unwrap();
+    fs::write(src_dir.join("new.txt"), "new").unwrap();
+    // Create target as a directory
+    fs::create_dir(&dest_path).unwrap();
+    fs::write(dest_path.join("old.txt"), "old").unwrap();
+
+    // Create a subdirectory at dest_path/item that will be replaced
+    let dest_item = dest_path.join("item");
+    fs::create_dir(&dest_item).unwrap();
+    fs::write(dest_item.join("inner.txt"), "inner").unwrap();
+
+    // Move src_dir (named "item") into dest_path
+    // This should move src_dir to dest_path/item, replacing the existing dest_path/item
+    let output = mvln_cmd()
+        .arg("-f")
+        .arg("-w")
+        .arg(&src_dir)
+        .arg(&dest_path)
+        .output()
+        .expect("Failed to run mvln");
+
+    // Debug output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("stdout: {stdout}");
+    eprintln!("stderr: {stderr}");
+    eprintln!("status: {:?}", output.status);
+
+    // Check what exists after the operation
+    eprintln!("src_dir exists: {}", src_dir.exists());
+    eprintln!("src_dir is_symlink: {}", src_dir.is_symlink());
+    eprintln!("dest_path exists: {}", dest_path.exists());
+    eprintln!("dest_item exists: {}", dest_item.exists());
+    eprintln!(
+        "dest_item/new.txt exists: {}",
+        dest_item.join("new.txt").exists()
+    );
+    eprintln!(
+        "dest_item/inner.txt exists: {}",
+        dest_item.join("inner.txt").exists()
+    );
+
+    assert!(output.status.success(), "Command should succeed");
+    assert!(src_dir.is_symlink(), "Source should be a symlink");
+    assert!(
+        dest_item.join("new.txt").exists(),
+        "new.txt should exist in dest/item"
+    );
+    assert!(
+        !dest_item.join("inner.txt").exists(),
+        "inner.txt should be gone (replaced)"
+    );
+}
