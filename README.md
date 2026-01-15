@@ -197,6 +197,14 @@ Messages, error descriptions, and hints are automatically localized.
 - **Atomic Operations**: File moves use filesystem primitives for atomicity
 - **Symlink Validation**: Verifies symlink creation and target resolution
 
+### Concurrency Warning
+
+⚠️ **Do not use `mvln` in highly concurrent modification environments.**
+
+For cross-filesystem moves, `mvln` uses a copy-then-remove strategy. There is an inherent TOCTOU (Time-of-Check Time-of-Use) race condition window between verifying the copy succeeded and removing the source. If another process modifies or deletes the destination during this window, data loss may occur.
+
+For single-user, non-concurrent workflows (the typical CLI use case), this is not a concern. For automated pipelines with concurrent file access, consider using filesystem-level locking or atomic rename operations instead.
+
 ## Use Cases
 
 ### Reorganizing Large Codebases
