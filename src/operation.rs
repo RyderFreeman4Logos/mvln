@@ -138,51 +138,8 @@ pub fn move_and_link<P: AsRef<Path>, Q: AsRef<Path>>(
     }
 
     // Step 7: Remove destination if force and exists
-    // SAFETY: Check symlink FIRST to avoid following symlinks to directories.
-    // is_dir() follows symlinks, so a symlink->dir would cause remove_dir_all
-    // to delete the target directory contents instead of just the symlink.
     if dest_exists && options.force {
-        // Type mismatch check: prevent replacing directory with file or vice versa.
-        // This protects against accidental deletion of entire directory trees.
-        // Symlinks at destination are always replaceable (they're just pointers).
-        if !dest.is_symlink() {
-            let dest_is_dir = dest.is_dir();
-            if source_is_real_dir != dest_is_dir {
-                return Err(MvlnError::TypeMismatch {
-                    src: source.to_path_buf(),
-                    dest: dest.clone(),
-                    src_type: if source_is_real_dir {
-                        "directory"
-                    } else {
-                        "file"
-                    },
-                    dest_type: if dest_is_dir { "directory" } else { "file" },
-                });
-            }
-        }
-
-        if dest.is_symlink() {
-            // Remove symlink itself, not the target
-            fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {
-                src: source.to_path_buf(),
-                dest: dest.clone(),
-                reason: format!("failed to remove existing symlink: {e}"),
-            })?;
-        } else if dest.is_dir() {
-            // Actual directory (not symlink), safe to remove recursively
-            fs::remove_dir_all(&dest).map_err(|e| MvlnError::MoveFailed {
-                src: source.to_path_buf(),
-                dest: dest.clone(),
-                reason: format!("failed to remove existing directory: {e}"),
-            })?;
-        } else {
-            // Regular file
-            fs::remove_file(&dest).map_err(|e| MvlnError::MoveFailed {
-                src: source.to_path_buf(),
-                dest: dest.clone(),
-                reason: format!("failed to remove existing file: {e}"),
-            })?;
-        }
+        remove_existing_destination(source, &dest, source_is_real_dir)?;
     }
 
     // Step 8: Move the file/directory
@@ -208,6 +165,63 @@ fn resolve_destination(source: &Path, dest: &Path) -> PathBuf {
     dest.to_path_buf()
 }
 
+/// Remove existing destination for force-overwrite.
+/// Checks type compatibility and removes the destination appropriately.
+fn remove_existing_destination(source: &Path, dest: &Path, source_is_real_dir: bool) -> Result<()> {
+    // Type mismatch check: prevent replacing directory with file or vice versa.
+    // This protects against accidental deletion of entire directory trees.
+    // Symlinks at destination are always replaceable (they're just pointers).
+    if !dest.is_symlink() {
+        let dest_is_dir = dest.is_dir();
+        if source_is_real_dir != dest_is_dir {
+            return Err(MvlnError::TypeMismatch {
+                src: source.to_path_buf(),
+                dest: dest.to_path_buf(),
+                src_type: if source_is_real_dir {
+                    "directory"
+                } else {
+                    "file"
+                },
+                dest_type: if dest_is_dir { "directory" } else { "file" },
+            });
+        }
+    }
+
+    // Use symlink_metadata to check file type without following symlinks.
+    // This is more robust than relying on is_symlink()/is_dir() order,
+    // as symlink_metadata explicitly does not follow symlinks.
+    let dest_meta = dest.symlink_metadata().map_err(|e| MvlnError::MoveFailed {
+        src: source.to_path_buf(),
+        dest: dest.to_path_buf(),
+        reason: format!("failed to read destination metadata: {e}"),
+    })?;
+
+    if dest_meta.is_symlink() {
+        // Remove symlink itself, not the target
+        fs::remove_file(dest).map_err(|e| MvlnError::MoveFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to remove existing symlink: {e}"),
+        })?;
+    } else if dest_meta.is_dir() {
+        // Actual directory (not symlink), safe to remove recursively
+        fs::remove_dir_all(dest).map_err(|e| MvlnError::MoveFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to remove existing directory: {e}"),
+        })?;
+    } else {
+        // Regular file
+        fs::remove_file(dest).map_err(|e| MvlnError::MoveFailed {
+            src: source.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("failed to remove existing file: {e}"),
+        })?;
+    }
+
+    Ok(())
+}
+
 /// Compute absolute path for a path without following symlinks.
 /// If the path is a symlink, canonicalize the parent and join with filename.
 /// If the path doesn't exist, build absolute path from parent.
@@ -227,6 +241,10 @@ fn absolute_path_no_follow(path: &Path) -> PathBuf {
         canonical
     } else {
         // Path doesn't exist - build absolute path from parent
+        // SAFETY: We must always return an absolute path to ensure starts_with() checks
+        // work correctly. If parent canonicalization fails (e.g., parent doesn't exist),
+        // fall back to joining with current working directory rather than returning
+        // a relative path, which would cause incorrect starts_with() comparisons.
         path.parent()
             .map(|p| {
                 if p.as_os_str().is_empty() {
@@ -237,7 +255,16 @@ fn absolute_path_no_follow(path: &Path) -> PathBuf {
             })
             .and_then(|p| p.canonicalize().ok())
             .map_or_else(
-                || path.to_path_buf(),
+                || {
+                    // Fallback: ensure absolute path even if parent doesn't exist
+                    if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        std::env::current_dir()
+                            .unwrap_or_else(|_| PathBuf::from("."))
+                            .join(path)
+                    }
+                },
                 |p| p.join(path.file_name().unwrap_or_default()),
             )
     }
@@ -342,6 +369,12 @@ fn copy_and_remove(source: &Path, dest: &Path) -> Result<()> {
     }
 
     // Verify copy succeeded before removing source
+    // NOTE: TOCTOU (Time-of-Check Time-of-Use) race condition warning.
+    // There is a window between verifying dest.exists() and removing source.
+    // If dest is deleted by another process in this window, source removal
+    // will cause data loss. Platform-specific atomic exchange (e.g., renameat2
+    // with RENAME_EXCHANGE on Linux) would be safer, but is not portable.
+    // Do not use mvln in highly concurrent modification environments.
     if !dest.exists() {
         return Err(MvlnError::CopyFailed {
             src: source.to_path_buf(),
@@ -350,7 +383,7 @@ fn copy_and_remove(source: &Path, dest: &Path) -> Result<()> {
         });
     }
 
-    // Remove source
+    // Remove source (see TOCTOU warning above)
     let remove_result = if source.is_dir() {
         fs::remove_dir_all(source)
     } else {
