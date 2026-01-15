@@ -30,6 +30,15 @@ pub enum MvlnError {
     #[error("cannot move directory into itself: {src} -> {dest}")]
     DestinationInsideSource { src: PathBuf, dest: PathBuf },
 
+    /// Type mismatch: cannot replace directory with file or vice versa.
+    #[error("type mismatch: cannot replace {dest_type} with {src_type}: {src} -> {dest}")]
+    TypeMismatch {
+        src: PathBuf,
+        dest: PathBuf,
+        src_type: &'static str,
+        dest_type: &'static str,
+    },
+
     /// Failed to move file.
     #[error("failed to move {src} to {dest}: {reason}")]
     MoveFailed {
