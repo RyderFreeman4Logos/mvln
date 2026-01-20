@@ -18,9 +18,7 @@ Move files and create symlinks at their original locations.
 ## Installation
 
 ```bash
-git clone https://github.com/RyderFreeman4Logos/mvls.git
-cd mvls
-just install
+cargo install --locked --git https://github.com/RyderFreeman4Logos/mvln
 ```
 
 ## Usage
